@@ -2,7 +2,7 @@
 
 **▶ Use it free:** https://sara-mostafshar.github.io/monte-carlo-risk-analysis/ · **🎥 Video (3 min):** https://youtu.be/S6XUDV6LFCs
 
-A free, transparent Monte Carlo cost and schedule risk tool for project controllers. Upload your cost estimate and risk register and get, in seconds:
+A free, transparent Monte Carlo cost and schedule risk tool for project controllers and project managers. Upload your cost estimate and risk register and get, in seconds:
 
 - P50 / P80 / P90 cost and finish dates
 - Probability of staying within budget (BAC) and finishing on time
@@ -20,4 +20,4 @@ Triangular distributions for estimate lines and risk impacts, one occurrence dra
 
 🔒 Runs entirely in your browser – your file is not uploaded anywhere. The sample project is fictional.
 
-Built by [Sara Mostafshar](https://sara-mostafshar.github.io) · AI agents and free tools for project controllers
+Built by [Sara Mostafshar](https://sara-mostafshar.github.io) · AI agents and free tools for project controllers and project managers
