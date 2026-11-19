@@ -104,6 +104,15 @@
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #fff; border-right-color: transparent; border-radius: 50%; animation: spin .8s linear infinite; vertical-align: -2px; margin-right: 6px; }
   @keyframes spin { to { transform: rotate(360deg); } }
 </style>
+<style>
+.yt-links{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.yt-links a{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:999px;font:600 14px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;text-decoration:none}
+.yt-links a.yt-watch{background:#ff0000;color:#fff}
+.yt-links a.yt-watch:hover{background:#d90000}
+.yt-links a.yt-sub{background:#fff;color:#14213d;border:1px solid #d5dae3}
+.yt-links a.yt-sub:hover{background:#f2f4f8}
+@media print{.yt-links{display:none!important}}
+</style>
 </head>
 <body>
 
@@ -113,6 +122,10 @@
     <h1>Monte Carlo Risk Analysis: is our contingency enough?</h1>
     <p class="lead">Upload your cost estimate and risk register. In a few seconds you see the realistic cost and finish date (P50 / P80), how likely you are to stay within budget and on time, and which risks drive the result — in plain language for management.</p>
     <div class="byline">Built by <strong>Sara Mostafshar</strong> · AI agents and tools for project controls</div>
+    <div class="yt-links">
+      <a class="yt-watch" href="https://youtu.be/S6XUDV6LFCs" target="_blank" rel="noopener">&#9654; Watch the 3-min video on YouTube</a>
+      <a class="yt-sub" href="https://www.youtube.com/@saramostafshar7216?sub_confirmation=1" target="_blank" rel="noopener">Subscribe to my channel</a>
+    </div>
     <div class="badges">
       <span class="badge">Runs 100% in your browser</span>
       <span class="badge">No data uploaded anywhere</span>
