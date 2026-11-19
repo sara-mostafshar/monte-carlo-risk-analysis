@@ -19,6 +19,7 @@
     --accent: #1c5cab;
     --series-cost: #2a78d6;
     --series-sched: #eb6834;
+    --series-est: #6a5acd;
     --ref-line: #7a7974;
     --good: #0ca30c;   --good-bg: #e3f4e3;
     --warning: #fab219; --warning-bg: #fff3d6;
@@ -55,6 +56,7 @@
   .settings { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 16px; }
   .settings label { font-size: 13px; color: var(--text-secondary); display: flex; flex-direction: column; gap: 4px; }
   .settings input { font: inherit; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; width: 150px; }
+  .settings .hint { font-size: 12px; color: var(--text-muted); max-width: 190px; }
   .errors { background: var(--critical-bg); border: 1px solid var(--critical); border-radius: 8px; padding: 12px 16px; margin-top: 14px; }
   .errors ul { margin: 6px 0 0; padding-left: 20px; }
   .hidden { display: none !important; }
@@ -130,10 +132,27 @@
       <button class="primary" id="btnSample">Try with sample project</button>
       <label class="btn" for="fileInput">Upload Excel file</label>
       <input type="file" id="fileInput" accept=".xlsx,.xls">
-      <button id="btnTemplate">Download Excel template</button>
+      <button id="btnTemplate">Download Excel template (with sample data)</button>
       <span class="filename" id="fileName"></span>
     </div>
     <p class="privacy">🔒 Your file is read by your own browser. Nothing is sent to a server, stored, or shared.</p>
+    <details id="fileGuide">
+      <summary>What should my Excel file look like?</summary>
+      <p style="font-size:14px;margin:10px 0 6px">The easiest way: <strong>download the template</strong>. It already contains the sample project, so you can see a complete, working example. Replace the example values with your own and upload the same file. The file needs three sheets:</p>
+      <div class="table-scroll"><table>
+        <tr><th>Sheet</th><th>What goes in it</th><th>Required columns</th></tr>
+        <tr><td><code>Project</code></td><td>One row per setting: name, reporting period, planned finish date, remaining-duration uncertainty (working days), contingency in budget, schedule contingency, iterations, random seed. Estimate correlation and delay cost per day are optional.</td><td>Parameter, Value</td></tr>
+        <tr><td><code>Cost_Estimate</code></td><td>One row per WBS line with a three-point estimate. Most likely = your budget for that line.</td><td>WBS, Min, Most likely, Max (Description and CAM optional)</td></tr>
+        <tr><td><code>Risk_Register</code></td><td>One row per risk with probability and three-point cost and schedule impacts.</td><td>Risk ID, Status, Probability, Cost min / most likely / max, Sched min / most likely / max (Title, Owner, Mitigation optional)</td></tr>
+      </table></div>
+      <ul style="font-size:14px;margin:8px 0 0;padding-left:20px">
+        <li>Probability as a fraction: <code>0.35</code> means 35%.</li>
+        <li>Only risks with Status = <code>Open</code> are simulated.</li>
+        <li>Min ≤ Most likely ≤ Max on every row. Use 0 for an impact type a risk does not have.</li>
+        <li>Amounts in EUR, schedule values in working days, dates as real Excel dates or <code>YYYY-MM-DD</code>.</li>
+        <li>Column order does not matter; the tool finds columns by their header names. If something is missing or wrong, the tool lists every problem so you can fix it.</li>
+      </ul>
+    </details>
     <div class="errors hidden" id="errors"></div>
 
     <div id="inputsPanel" class="hidden">
@@ -150,6 +169,8 @@
       <div class="settings">
         <label>Iterations <input type="number" id="iterations" min="100" max="100000" step="100"></label>
         <label>Random seed <input type="number" id="seed" step="1"></label>
+        <label>Estimate correlation <input type="number" id="corr" min="0" max="0.9" step="0.05"><span class="hint">0 = lines independent. 0.2–0.5 is typical: lines tend to run high or low together.</span></label>
+        <label>Delay cost per working day (EUR) <input type="number" id="delayCost" min="0" step="1000"><span class="hint">Optional. Time-related cost (site, staff, equipment) for each day late. 0 = off.</span></label>
       </div>
     </div>
   </section>
@@ -202,11 +223,14 @@
 
     <h3>Top 3 risk drivers and suggested actions</h3>
     <div id="drivers"></div>
+    <h3>Estimate lines to firm up</h3>
+    <p class="chart-sub">Uncertainty in the base estimate itself, before any risk event. Narrowing these ranges reduces the contingency you need.</p>
+    <div id="estDrivers"></div>
 
-    <h3>Sensitivity: which risks move the result most?</h3>
-    <p class="chart-sub">Spearman rank correlation of each risk with total cost (cost risks) or with finish delay (schedule risks). Longer bar = stronger influence.</p>
-    <div class="legend"><span style="--c:var(--series-cost)">Cost impact</span><span style="--c:var(--series-sched)">Schedule impact</span></div>
-    <div class="chart-box" style="height:360px"><canvas id="tornadoChart" aria-label="Sensitivity tornado chart"></canvas></div>
+    <h3>Sensitivity: what moves the result most?</h3>
+    <p class="chart-sub">Spearman rank correlation of each risk and each estimate line with total cost, and of each schedule risk with finish delay. Longer bar = stronger influence.</p>
+    <div class="legend"><span style="--c:var(--series-cost)">Risk – cost impact</span><span style="--c:var(--series-est)">Estimate line uncertainty</span><span style="--c:var(--series-sched)">Risk – schedule impact</span></div>
+    <div class="chart-box" style="height:440px"><canvas id="tornadoChart" aria-label="Sensitivity tornado chart"></canvas></div>
     <details>
       <summary>Show sensitivity as a table</summary>
       <div class="table-scroll"><table id="sensTable"></table></div>
@@ -224,13 +248,14 @@
   <section class="card how" id="how">
     <h2>How it works — the full method, no black box</h2>
     <ol>
-      <li><strong>Estimate uncertainty.</strong> Each WBS line has a Min, Most likely and Max cost. In every iteration the tool draws one value from a <em>triangular distribution</em> between these three points.</li>
+      <li><strong>Estimate uncertainty.</strong> Each WBS line has a Min, Most likely and Max cost. In every iteration the tool draws one value from a <em>triangular distribution</em> between these three points.<br>
+          <strong>Estimate correlation</strong> (optional, 0 to 0.9) lets the lines move together, as they usually do when market prices or productivity shift for the whole project. It uses one shared factor for all lines (a Gaussian copula); each line keeps its own Min / Most likely / Max. At 0 the lines are independent.</li>
       <li><strong>Risk events.</strong> Only risks with Status = <code>Open</code> are used. In every iteration each risk either happens (with its probability) or not. If it happens, its cost impact and schedule delay are drawn from their own triangular distributions. The same occurrence hits cost <em>and</em> schedule.</li>
-      <li><strong>Total cost</strong> = sum of the WBS draws + cost of the risks that happened.<br>
+      <li><strong>Total cost</strong> = sum of the WBS draws + cost of the risks that happened + (optional) time-related cost: delay cost per working day × working days later than the planned finish.<br>
           <strong>Budget (BAC)</strong> = sum of the Most likely values + contingency in budget. Contingency itself is not simulated — the question is whether it is enough.</li>
       <li><strong>Finish date</strong> = planned finish + remaining-duration uncertainty (triangular, working days) + delays of risks that happened − schedule contingency, counted in working days (Mon–Fri). All risk delays are assumed to hit the critical path and add up, which is conservative.</li>
       <li><strong>Results.</strong> After all iterations the tool sorts the outcomes: P50 is the value with a 50% chance of not being exceeded, P80 with 80%, and so on. <em>Contingency needed for P80</em> = P80 cost − base estimate.</li>
-      <li><strong>Drivers.</strong> Each risk is ranked by Spearman rank correlation between its sampled impact and the total cost (or finish delay). The top drivers are where mitigation pays off most.</li>
+      <li><strong>Drivers.</strong> Each risk <em>and each estimate line</em> is ranked by Spearman rank correlation between its sampled value and the total cost (schedule risks: the finish delay). The <em>share of cost spread</em> is how much of the total cost variance each input explains (its covariance with total cost ÷ variance of total cost); all cost inputs add up to 100% (less any time-related delay cost). The top drivers are where action pays off most: mitigation for risks, firmer quotes or fixed-price awards for estimate lines.</li>
     </ol>
     <h3>Traffic-light thresholds</h3>
     <div class="table-scroll"><table>
@@ -243,7 +268,7 @@
     <h3>Good to know</h3>
     <ul>
       <li>The same inputs and random seed always give the same result, so runs are reproducible and auditable.</li>
-      <li>Cost lines and risks are treated as independent. In real projects they are often correlated, so the true range can be wider.</li>
+      <li>Risks are treated as independent of each other. Estimate lines are independent unless you set an estimate correlation; with 0 the true range is usually wider than shown.</li>
       <li>Results are only as good as the three-point estimates and probabilities in the register. Use the tool to start a conversation, not to replace judgement.</li>
     </ul>
   </section>
@@ -266,6 +291,8 @@ const SAMPLE = {
     "Remaining duration uncertainty – pessimistic (working days)": 15,
     "Contingency in budget (EUR)": 3000000,
     "Schedule contingency (working days)": 30,
+    "Estimate correlation (0 to 0.9)": 0,
+    "Time-related cost per working day of delay (EUR)": 0,
     "Iterations": 10000,
     "Random seed": 2026
   },
@@ -336,12 +363,26 @@ function makeRng(seed) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-// Triangular distribution by inverse CDF. Min = Max means a fixed value.
+// Triangular distribution by inverse CDF: turns a probability u (0–1) into a value.
+function triInv(u, lo, ml, hi) {
+  ml = Math.min(Math.max(ml, lo), hi);
+  const c = (ml - lo) / (hi - lo);
+  return u < c ? lo + Math.sqrt(u * (hi - lo) * (ml - lo)) : hi - Math.sqrt((1 - u) * (hi - lo) * (hi - ml));
+}
+// Min = Max means a fixed value.
 function triangular(rng, lo, ml, hi) {
   if (hi <= lo) return ml;
-  ml = Math.min(Math.max(ml, lo), hi);
-  const u = rng(), c = (ml - lo) / (hi - lo);
-  return u < c ? lo + Math.sqrt(u * (hi - lo) * (ml - lo)) : hi - Math.sqrt((1 - u) * (hi - lo) * (hi - ml));
+  return triInv(rng(), lo, ml, hi);
+}
+// Standard normal draw (Box–Muller) and normal CDF (Abramowitz & Stegun 7.1.26, error < 2e-7).
+function normal(rng) {
+  const u = 1 - rng(), v = rng();
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+function normCdf(z) {
+  const x = Math.abs(z) / Math.SQRT2, t = 1 / (1 + 0.3275911 * x);
+  const erf = 1 - t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-x * x);
+  return z >= 0 ? 0.5 * (1 + erf) : 0.5 * (1 - erf);
 }
 // Linear-interpolated percentile (same rule as numpy's default).
 function quantileSorted(sorted, q) {
@@ -388,9 +429,10 @@ let result = null;   // last simulation
 
 function projectGetter(p) {
   const keys = Object.keys(p);
-  return (prefix, errors) => {
+  return (prefix, errors, optional) => {
     const k = keys.find(k => k.toLowerCase().startsWith(prefix.toLowerCase()));
-    if (!k) { errors.push(`Project sheet: missing parameter "${prefix}…".`); return null; }
+    if (!k) { if (optional) return optional.fallback; errors.push(`Project sheet: missing parameter "${prefix}…".`); return null; }
+    if (optional && (p[k] === null || p[k] === undefined || p[k] === "")) return optional.fallback;
     const v = p[k];
     if (v === null || v === undefined || v === "") { errors.push(`Project sheet: "${k}" has no value.`); return null; }
     return v;
@@ -410,9 +452,14 @@ function buildModel(projectMap, estRows, riskRows) {
     schedContingency: toNum(get("Schedule contingency", errors)),
     n: toNum(get("Iterations", errors)),
     seed: toNum(get("Random seed", errors)),
+    // Optional parameters: older files without them run exactly as before.
+    corr: toNum(get("Estimate correlation", errors, { fallback: 0 })),
+    delayCost: toNum(get("Time-related cost per working day", errors, { fallback: 0 })),
     estimate: [], risks: [], closedCount: 0
   };
   if (isNaN(m.plannedFinish)) errors.push("Project sheet: Planned finish must be a date (YYYY-MM-DD).");
+  if (!(isFinite(m.corr) && m.corr >= 0 && m.corr <= 0.9)) errors.push(`Project sheet: Estimate correlation must be a number from 0 to 0.9 (e.g. 0.3); found "${m.corr}".`);
+  if (!(isFinite(m.delayCost) && m.delayCost >= 0)) errors.push(`Project sheet: Time-related cost per working day of delay must be a number of 0 or more; found "${m.delayCost}".`);
   for (const [label, v] of [["Contingency in budget", m.contingency], ["Schedule contingency", m.schedContingency], ["Random seed", m.seed]])
     if (v !== null && !isFinite(v)) errors.push(`Project sheet: ${label} must be a number.`);
   if (m.n !== null && !(Number.isInteger(m.n) && m.n >= 1)) errors.push("Project sheet: Iterations must be a positive whole number.");
@@ -505,8 +552,19 @@ function fromWorkbook(wb) {
 function simulate(m) {
   const n = m.n, rng = makeRng(m.seed);
   const cost = new Float64Array(n), delayWd = new Float64Array(n);
-  // Base estimate uncertainty
-  for (const e of m.estimate) for (let i = 0; i < n; i++) cost[i] += triangular(rng, e.min, e.ml, e.max);
+  // Base estimate uncertainty. With correlation > 0, all WBS lines share one common
+  // "market / estimating" factor (Gaussian copula), so they tend to run high or low together.
+  const estImp = {};
+  const rho = m.corr || 0, common = rho > 0 ? Float64Array.from({ length: n }, () => normal(rng)) : null;
+  for (const e of m.estimate) {
+    const a = new Float64Array(n);
+    for (let i = 0; i < n; i++) {
+      if (!common || e.max <= e.min) a[i] = triangular(rng, e.min, e.ml, e.max);
+      else a[i] = triInv(normCdf(Math.sqrt(rho) * common[i] + Math.sqrt(1 - rho) * normal(rng)), e.min, e.ml, e.max);
+      cost[i] += a[i];
+    }
+    estImp[e.wbs] = a;
+  }
   // Risk events: one occurrence draw per risk per iteration, shared by cost and schedule
   const costImp = {}, schedImp = {};
   for (const r of m.risks) {
@@ -525,12 +583,15 @@ function simulate(m) {
   }
   // Schedule: duration uncertainty + risk delays - schedule contingency, in working days
   const finish = new Float64Array(n), delayDays = new Float64Array(n);
+  const timeCost = m.delayCost > 0 ? new Float64Array(n) : null;
   for (let i = 0; i < n; i++) {
     let d = triangular(rng, ...m.dur);
     for (const id in schedImp) d += schedImp[id][i];
     delayWd[i] = Math.round(d - m.schedContingency);
     finish[i] = addWorkingDays(m.plannedFinish, delayWd[i]);
     delayDays[i] = Math.round((finish[i] - m.plannedFinish) / DAY);
+    // Optional: every working day later than the planned finish adds time-related cost (site, staff, cranes).
+    if (timeCost) { timeCost[i] = m.delayCost * Math.max(0, delayWd[i]); cost[i] += timeCost[i]; }
   }
 
   const base = m.estimate.reduce((s, e) => s + e.ml, 0), bac = base + m.contingency;
@@ -540,33 +601,50 @@ function simulate(m) {
   let within = 0, onTime = 0, sum = 0;
   for (let i = 0; i < n; i++) { if (cost[i] <= bac) within++; if (finish[i] <= m.plannedFinish) onTime++; sum += cost[i]; }
 
-  // Sensitivity (Spearman) – top 5 cost and top 5 schedule drivers
-  const info = Object.fromEntries(m.risks.map(r => [r.id, r]));
-  const rankDrivers = (imp, total, dimension) => {
-    const tr = ranks(total), rows = [];
+  // Sensitivity (Spearman): top 5 cost risks, top 5 schedule risks and top 3 estimate lines
+  const info = Object.fromEntries(m.risks.map(r => [r.id, { title: r.title, owner: r.owner }]));
+  const einfo = Object.fromEntries(m.estimate.map(e => [e.wbs, { title: e.desc, owner: e.cam }]));
+  const costRanks = ranks(cost), delayRanks = ranks(delayDays);
+  const score = (imp, tr, dimension, meta) => {
+    const rows = [];
     for (const id in imp) {
       const col = imp[id]; let first = col[0], varies = false;
       for (let i = 1; i < n; i++) if (col[i] !== first) { varies = true; break; }
       if (!varies) continue;
       const s = pearson(ranks(col), tr);
       if (!isFinite(s)) continue;
-      rows.push({ dimension, risk_id: id, description: info[id].title, owner: info[id].owner,
-                  sensitivity: Math.round(s * 100) / 100, mean_impact: col.reduce((a, b) => a + b, 0) / n });
+      let mean = 0; for (let i = 0; i < n; i++) mean += col[i]; mean /= n;
+      rows.push({ dimension, risk_id: dimension === "estimate" ? "WBS " + id : id, description: String(meta[id].title), owner: String(meta[id].owner),
+                  sensitivity: Math.round(s * 100) / 100, mean_impact: mean, col });
     }
-    rows.sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity));
-    return rows.slice(0, 5);
+    return rows;
   };
-  const drivers = [...rankDrivers(costImp, cost, "cost"), ...rankDrivers(schedImp, delayDays, "schedule")];
+  const top = (rows, k) => rows.sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity) || a.risk_id.localeCompare(b.risk_id)).slice(0, k);
+  const costRows = [...score(costImp, costRanks, "cost", info), ...score(estImp, costRanks, "estimate", einfo)];
+  // Share of the total cost spread each input explains = cov(input, total) / var(total).
+  // The shares of all cost inputs add up to 100% (less any time-related delay cost).
+  let cm = 0; for (let i = 0; i < n; i++) cm += cost[i]; cm /= n;
+  let cv = 0; for (let i = 0; i < n; i++) cv += (cost[i] - cm) ** 2;
+  costRows.forEach(d => {
+    let xm = 0; for (let i = 0; i < n; i++) xm += d.col[i]; xm /= n;
+    let c = 0; for (let i = 0; i < n; i++) c += (d.col[i] - xm) * (cost[i] - cm);
+    d.share = cv ? c / cv : 0; delete d.col;
+  });
+  const schedRows = score(schedImp, delayRanks, "schedule", info); schedRows.forEach(d => delete d.col);
+  const drivers = [...top(costRows.filter(d => d.dimension === "cost"), 5), ...top(schedRows, 5),
+                   ...costRows.filter(d => d.dimension === "estimate").sort((a, b) => b.share - a.share || a.risk_id.localeCompare(b.risk_id)).slice(0, 3)];
+  const estShare = costRows.filter(d => d.dimension === "estimate").reduce((s, d) => s + d.share, 0);
+  const riskShare = costRows.filter(d => d.dimension === "cost").reduce((s, d) => s + d.share, 0);
 
   return {
-    n, cost, finish, sc, sf, costImp, schedImp, drivers, base, bac,
+    n, cost, finish, sc, sf, costImp, schedImp, estImp, timeCost, drivers, estShare, riskShare, base, bac,
     p10: pc(.10), p50: pc(.50), p80: pc(.80), p90: pc(.90), mean: sum / n,
     f50: pf(.50), f80: pf(.80), f90: pf(.90),
     probWithin: within / n, probOnTime: onTime / n
   };
 }
 
-/* ---------------------------------------------------------------- interpretation (same rules as the Python model) */
+/* ---------------------------------------------------------------- interpretation (same thresholds as the Python model) */
 function interpret(m, r) {
   const headroomP80 = r.bac - r.p80, headroomShare = r.bac ? headroomP80 / r.bac : null;
   const probOver = 1 - r.probWithin;
@@ -583,39 +661,57 @@ function interpret(m, r) {
   ];
   // Top 3 distinct risks, keeping each risk's stronger dimension
   const best = {};
-  for (const d of r.drivers) if (!best[d.risk_id] || Math.abs(d.sensitivity) > Math.abs(best[d.risk_id].sensitivity)) best[d.risk_id] = d;
+  for (const d of r.drivers) if (d.dimension !== "estimate" && (!best[d.risk_id] || Math.abs(d.sensitivity) > Math.abs(best[d.risk_id].sensitivity))) best[d.risk_id] = d;
   const top = Object.values(best).sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity) || a.risk_id.localeCompare(b.risk_id)).slice(0, 3);
+  // Estimate lines are shown separately: they need estimating actions, not risk mitigation.
+  const estTop = r.drivers.filter(d => d.dimension === "estimate").slice(0, 2);
   const mit = Object.fromEntries(m.risks.map(x => [x.id, x.mitigation]));
+  const est = Object.fromEntries(m.estimate.map(e => ["WBS " + e.wbs, e]));
+  const sign = v => `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+  estTop.forEach(d => {
+    const e = est[d.risk_id];
+    d.why = `The estimate range on this line (${fmtMoney(e.min)} to ${fmtMoney(e.max)}) explains ${fmtPct(d.share)} of the total cost uncertainty.`;
+    d.action = `${d.owner || "Cost account manager"} to narrow the estimate range for ${d.risk_id}: firm vendor quotes, a fixed-price or capped award, or an estimate review.`;
+  });
   top.forEach(d => {
     d.why = d.dimension === "cost"
-      ? `When this risk occurs the total cost is higher (correlation ${d.sensitivity >= 0 ? "+" : ""}${d.sensitivity.toFixed(2)}). Mean impact is ${fmtMoney(d.mean_impact)}.`
-      : `When this risk occurs the finish is later (correlation ${d.sensitivity >= 0 ? "+" : ""}${d.sensitivity.toFixed(2)}). Mean impact is ${d.mean_impact.toFixed(1)} working days.`;
+      ? `When this risk occurs the total cost is higher (correlation ${sign(d.sensitivity)}); it explains ${fmtPct(d.share)} of the total cost uncertainty. Mean impact is ${fmtMoney(d.mean_impact)}.`
+      : `When this risk occurs the finish is later (correlation ${sign(d.sensitivity)}). Mean impact is ${d.mean_impact.toFixed(1)} working days.`;
     d.action = mit[d.risk_id]
       ? `${d.owner || "Risk owner"} to confirm the planned mitigation is funded and on track: ${mit[d.risk_id]}.`
       : `Agree an owner, an early warning trigger, and a funded response plan for ${d.risk_id}.`;
   });
   const warnings = [];
   if (floatP80 > 20 * 7) warnings.push("The planned finish gives a very large buffer – check that it is correct.");
-  if (r.p50 && (r.p90 - r.p10) / r.p50 < 0.10) warnings.push("The cost range may be too narrow because cost elements are treated as independent.");
+  if (r.p50 && (r.p90 - r.p10) / r.p50 < 0.10) warnings.push(m.corr > 0
+    ? "The cost range (P10 to P90) is still below 10% of P50. Check that the Min / Max estimate ranges are realistic for this project stage."
+    : "The cost range (P10 to P90) is below 10% of P50. Estimate lines are treated as independent; on most projects they move together. Try an estimate correlation of 0.3 (in the settings above) to see a more realistic range.");
 
   const gap = contP80 - contHeld;
   const gapText = gap > 0 ? `${fmtMoney(gap)} more than` : gap < 0 ? `${fmtMoney(-gap)} less than` : "equal to";
   const costText = `BAC is ${fmtMoney(r.bac)} (base estimate ${fmtMoney(r.base)} plus contingency ${fmtMoney(contHeld)}). ` +
     `Contingency needed to reach P80 is ${fmtMoney(contP80)} (${fmtPct(contShare)} of the base estimate), which is ${gapText} the contingency held. ` +
-    `The probability of a cost overrun against BAC is ${fmtPct(probOver)}. Negative headroom means an overrun.`;
+    `The probability of a cost overrun against BAC is ${fmtPct(probOver)}. Negative headroom means an overrun. ` +
+    `Estimate uncertainty explains ${fmtPct(r.estShare)} of the cost spread and risk events ${fmtPct(r.riskShare)}` +
+    (m.delayCost > 0 ? `; time-related cost of delay (${fmtMoney(m.delayCost)} per working day late) is included.` : ".") +
+    (m.corr > 0 ? ` Estimate lines are correlated at ${m.corr}.` : "");
   const schedText = `The probability of finishing on or before the planned finish is ${fmtPct(r.probOnTime)}. ` +
     `Float at P80 is ${floatP80} calendar days; negative float means P80 is later than planned.`;
   const headline = `${m.project} (${m.period}) has a realistic cost of ${fmtMoney(r.p50)} (P50) to ${fmtMoney(r.p80)} (P80) against a budget (BAC) of ${fmtMoney(r.bac)}. ` +
     `Expected finish is ${isoDate(r.f50)} to ${isoDate(r.f80)} vs planned ${isoDate(m.plannedFinish)}.`;
   const lead = top.length ? `${top[0].risk_id} ${top[0].description}` : "the modelled risks";
+  const estLead = estTop.length ? ` The largest estimate uncertainty is ${estTop[0].risk_id} ${estTop[0].description} (${fmtPct(estTop[0].share)} of the cost spread).` : "";
   const summary = `${m.project} has P50 cost of ${fmtMoney(r.p50)} and P80 cost of ${fmtMoney(r.p80)}, with headroom of ${fmtMoney(headroomP80)} to BAC at P80. ` +
     `P50/P80 finish is ${isoDate(r.f50)} / ${isoDate(r.f80)} against planned ${isoDate(m.plannedFinish)}; the probability of finishing within BAC is ${fmtPct(r.probWithin)} and on time ${fmtPct(r.probOnTime)}. ` +
-    `Contingency needed to reach P80 is ${fmtMoney(contP80)} against ${fmtMoney(contHeld)} held, and ${lead} is the highest-ranked driver for management attention.`;
-  return { lights, top, warnings, costText, schedText, headline, summary, floatP80, contP80, contHeld, headroomP80 };
+    `Contingency needed to reach P80 is ${fmtMoney(contP80)} against ${fmtMoney(contHeld)} held, and ${lead} is the highest-ranked risk for management attention.` + estLead;
+  return { lights, top, estTop, warnings, costText, schedText, headline, summary, floatP80, contP80, contHeld, headroomP80 };
 }
 
 /* ---------------------------------------------------------------- rendering */
 const STATUS_TEXT = { green: "On track", amber: "Watch", red: "Action needed" };
+const DIM_TEXT = { cost: "Cost risk", schedule: "Schedule risk", estimate: "Estimate uncertainty" };
+const impactText = d => d.dimension === "schedule" ? d.mean_impact.toFixed(1) + " wd" : fmtMoney(d.mean_impact);
+const shareText = d => d.dimension === "schedule" ? "–" : fmtPct(d.share);
 const statusPill = s => `<span class="status ${s}"><span class="dot"></span>${STATUS_TEXT[s]}</span>`;
 
 function showErrors(list) {
@@ -639,7 +735,7 @@ function renderInputs(m) {
   $("riskTable").innerHTML = `<tr><th>ID</th><th>Title</th><th>Owner</th><th class="num">Prob.</th><th class="num">Cost min / ML / max</th><th class="num">Delay min / ML / max (wd)</th></tr>` +
     m.risks.map(r => `<tr><td>${esc(r.id)}</td><td>${esc(r.title)}</td><td>${esc(r.owner)}</td><td class="num">${fmtPct(r.prob)}</td>
       <td class="num">${r.cost.map(v => (v / 1000).toFixed(0) + "k").join(" / ")}</td><td class="num">${r.sched.join(" / ")}</td></tr>`).join("");
-  $("iterations").value = m.n; $("seed").value = m.seed;
+  $("iterations").value = m.n; $("seed").value = m.seed; $("corr").value = m.corr; $("delayCost").value = m.delayCost;
   $("inputsPanel").classList.remove("hidden");
 }
 
@@ -706,20 +802,21 @@ function drawSCurve(id, pts, lines, xFmt, xTitle, sorted, tf) {
 function drawTornado(drivers) {
   const sorted = [...drivers].sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity));
   const css = getComputedStyle(document.documentElement);
-  const cCost = css.getPropertyValue("--series-cost").trim(), cSched = css.getPropertyValue("--series-sched").trim();
+  const col = { cost: css.getPropertyValue("--series-cost").trim(), schedule: css.getPropertyValue("--series-sched").trim(), estimate: css.getPropertyValue("--series-est").trim() };
   charts.tornado?.destroy();
   charts.tornado = new Chart($("tornadoChart"), {
     type: "bar",
     data: {
       labels: sorted.map(d => `${d.risk_id} ${d.description.length > 42 ? d.description.slice(0, 40) + "…" : d.description}`),
-      datasets: [{ data: sorted.map(d => d.sensitivity), backgroundColor: sorted.map(d => d.dimension === "cost" ? cCost : cSched),
+      datasets: [{ data: sorted.map(d => d.sensitivity), backgroundColor: sorted.map(d => col[d.dimension]),
                    borderRadius: 4, borderSkipped: "start", barPercentage: 0.7, categoryPercentage: 0.9 }]
     },
     options: {
       indexAxis: "y", responsive: true, maintainAspectRatio: false, animation: false,
       plugins: { legend: { display: false },
                  tooltip: { callbacks: { label: it => { const d = sorted[it.dataIndex];
-                   return `${d.dimension === "cost" ? "Cost" : "Schedule"} risk · correlation ${d.sensitivity.toFixed(2)} · mean impact ${d.dimension === "cost" ? fmtMoney(d.mean_impact) : d.mean_impact.toFixed(1) + " wd"}`; } } } },
+                   return d.dimension === "estimate" ? `Estimate uncertainty · correlation ${d.sensitivity.toFixed(2)} · ${fmtPct(d.share)} of cost spread`
+                     : `${DIM_TEXT[d.dimension]} · correlation ${d.sensitivity.toFixed(2)} · mean impact ${impactText(d)}`; } } } },
       scales: { x: { min: 0, max: Math.max(0.6, Math.ceil(Math.abs(sorted[0]?.sensitivity || 0.5) * 10) / 10), title: { display: true, text: "Spearman rank correlation", color: "#52514e" }, ticks: { color: "#52514e" }, grid: { color: "#ecebe6" } },
                 y: { ticks: { color: "#0b0b0b", autoSkip: false }, grid: { display: false } } }
     }
@@ -756,15 +853,20 @@ function renderResults(m, r, it) {
 
   $("drivers").innerHTML = it.top.length ? it.top.map((d, i) => `
     <div class="driver"><div class="title">${i + 1}. ${esc(d.risk_id)} ${esc(d.description)}</div>
-      <div class="meta">${d.dimension === "cost" ? "Cost" : "Schedule"} risk · Owner: ${esc(d.owner || "–")}</div>
+      <div class="meta">${DIM_TEXT[d.dimension]} · ${d.dimension === "estimate" ? "CAM" : "Owner"}: ${esc(d.owner || "–")}</div>
       <div>${esc(d.why)}</div><div class="action"><strong>Suggested action:</strong> ${esc(d.action)}</div></div>`).join("")
     : "<p>No variable risk drivers were available for ranking.</p>";
+  $("estDrivers").innerHTML = it.estTop.length ? it.estTop.map(d => `
+    <div class="driver"><div class="title">${esc(d.risk_id)} ${esc(d.description)}</div>
+      <div class="meta">Estimate uncertainty · CAM: ${esc(d.owner || "–")}</div>
+      <div>${esc(d.why)}</div><div class="action"><strong>Suggested action:</strong> ${esc(d.action)}</div></div>`).join("")
+    : "<p>All estimate lines are fixed values (Min = Max).</p>";
 
   drawTornado(r.drivers);
-  $("sensTable").innerHTML = `<tr><th>Rank</th><th>Dimension</th><th>Risk</th><th>Owner</th><th class="num">Correlation</th><th class="num">Mean impact</th></tr>` +
+  $("sensTable").innerHTML = `<tr><th>Rank</th><th>Type</th><th>Driver</th><th>Owner / CAM</th><th class="num">Correlation</th><th class="num">Share of cost spread</th><th class="num">Mean value</th></tr>` +
     [...r.drivers].sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity)).map((d, i) =>
-      `<tr><td>${i + 1}</td><td>${d.dimension}</td><td>${esc(d.risk_id)} ${esc(d.description)}</td><td>${esc(d.owner)}</td><td class="num">${d.sensitivity.toFixed(2)}</td>
-       <td class="num">${d.dimension === "cost" ? fmtMoney(d.mean_impact) : d.mean_impact.toFixed(1) + " wd"}</td></tr>`).join("");
+      `<tr><td>${i + 1}</td><td>${DIM_TEXT[d.dimension]}</td><td>${esc(d.risk_id)} ${esc(d.description)}</td><td>${esc(d.owner)}</td><td class="num">${d.sensitivity.toFixed(2)}</td>
+       <td class="num">${shareText(d)}</td><td class="num">${impactText(d)}</td></tr>`).join("");
 
   $("mgmtSummary").textContent = it.summary;
   $("results").classList.remove("hidden");
@@ -778,6 +880,8 @@ function templateWorkbook() {
                 ["Parameter", "Value", "Note"]];
   const notes = { "Planned finish (baseline)": "Date, YYYY-MM-DD", "Contingency in budget (EUR)": "Included in BAC; not simulated",
                   "Schedule contingency (working days)": "Buffer between deterministic finish and planned finish",
+                  "Estimate correlation (0 to 0.9)": "Optional. How strongly WBS estimate lines move together. 0 = independent; 0.2–0.5 typical",
+                  "Time-related cost per working day of delay (EUR)": "Optional. Extra cost per working day later than planned finish. 0 = off",
                   "Iterations": "Number of Monte Carlo iterations", "Random seed": "Same seed = same result" };
   for (const [k, v] of Object.entries(SAMPLE.project)) proj.push([k, v, notes[k] || ""]);
   const est = [["Base estimate with estimating uncertainty (EUR) – three-point estimate per WBS"],
@@ -797,10 +901,13 @@ function exportResults(m, r, it) {
   const sheet = (rows, name, widths) => { const ws = XLSX.utils.aoa_to_sheet(rows); if (widths) ws["!cols"] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, name); };
   sheet([["Interpretation"], [it.headline], [], ["Cost"], [it.costText], [], ["Schedule"], [it.schedText], [],
          ["Traffic lights"], ["Measure", "Value", "Status"], ...it.lights.map(l => [l.label, l.value === null ? "n/a" : Math.round(l.value * 1000) / 10 + "%", STATUS_TEXT[l.status]]), [],
-         ["Top 3 drivers"], ...it.top.flatMap((d, i) => [[`${i + 1}. ${d.risk_id} ${d.description} (${d.dimension})`], [d.why], ["Suggested action: " + d.action]]), [],
+         ["Top 3 risk drivers"], ...it.top.flatMap((d, i) => [[`${i + 1}. ${d.risk_id} ${d.description} (${DIM_TEXT[d.dimension]})`], [d.why], ["Suggested action: " + d.action]]), [],
+         ...(it.estTop.length ? [["Estimate lines to firm up"], ...it.estTop.flatMap(d => [[`${d.risk_id} ${d.description}`], [d.why], ["Suggested action: " + d.action]]), []] : []),
          ...(it.warnings.length ? [["Warnings"], ...it.warnings.map(w => [w]), []] : []),
          ["Management summary"], [it.summary]], "Interpretation", [110, 14, 16]);
   sheet([["Project", m.project], ["Reporting period", m.period], ["Currency", CUR], ["Iterations", r.n], ["Random seed", m.seed], ["Open risks simulated", m.risks.length],
+         ["Estimate correlation", m.corr], ["Time-related cost per working day of delay", m.delayCost],
+         ["Share of cost spread from estimate uncertainty", Math.round(r.estShare * 1000) / 1000], ["Share of cost spread from risk events", Math.round(r.riskShare * 1000) / 1000],
          ["Base estimate", Math.round(r.base)], ["Contingency in budget", Math.round(r.bac - r.base)], ["BAC", Math.round(r.bac)], ["Mean cost", Math.round(r.mean)],
          ["P50 cost", Math.round(r.p50)], ["P80 cost", Math.round(r.p80)], ["P90 cost", Math.round(r.p90)],
          ["Probability within BAC", r.probWithin], ["Contingency needed for P80", Math.round(it.contP80)],
@@ -808,13 +915,17 @@ function exportResults(m, r, it) {
          ["Probability of on-time finish", r.probOnTime]], "Summary", [32, 34]);
   sheet([["Percentile", `Cost (${CUR})`, "Finish date"], ["P10", Math.round(r.p10), isoDate(Math.round(quantileSorted(r.sf, .1) / DAY) * DAY)],
          ["P50", Math.round(r.p50), isoDate(r.f50)], ["P80", Math.round(r.p80), isoDate(r.f80)], ["P90", Math.round(r.p90), isoDate(r.f90)]], "Percentiles", [12, 16, 14]);
-  sheet([["Rank", "Dimension", "Risk ID", "Description", "Owner", "Spearman correlation", "Mean impact", "Unit"],
+  sheet([["Rank", "Type", "Driver", "Description", "Owner / CAM", "Spearman correlation", "Share of cost spread", "Mean value", "Unit"],
          ...[...r.drivers].sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity)).map((d, i) =>
-           [i + 1, d.dimension, d.risk_id, d.description, d.owner, d.sensitivity, Math.round(d.mean_impact * 10) / 10, d.dimension === "cost" ? CUR : "working days"])],
-         "Sensitivity", [6, 10, 8, 50, 14, 12, 12, 12]);
+           [i + 1, DIM_TEXT[d.dimension], d.risk_id, d.description, d.owner, d.sensitivity, d.dimension === "schedule" ? "" : Math.round(d.share * 1000) / 1000,
+            Math.round(d.mean_impact * 10) / 10, d.dimension === "schedule" ? "working days" : CUR])],
+         "Sensitivity", [6, 20, 10, 50, 14, 12, 12, 14, 12]);
   const cids = Object.keys(r.costImp), sids = Object.keys(r.schedImp), shown = Math.min(r.n, 1000);
-  const rows = [["Iteration", "Finish date", ...cids.map(id => `Risk cost: ${id}`), ...sids.map(id => `Risk delay (wd): ${id}`), "Total cost"]];
-  for (let i = 0; i < shown; i++) rows.push([i + 1, isoDate(r.finish[i]), ...cids.map(id => Math.round(r.costImp[id][i])), ...sids.map(id => Math.round(r.schedImp[id][i] * 10) / 10), Math.round(r.cost[i])]);
+  const eids = Object.keys(r.estImp);
+  const rows = [["Iteration", "Finish date", ...eids.map(id => `Estimate: WBS ${id}`), ...cids.map(id => `Risk cost: ${id}`), ...sids.map(id => `Risk delay (wd): ${id}`),
+                 ...(r.timeCost ? ["Time-related delay cost"] : []), "Total cost"]];
+  for (let i = 0; i < shown; i++) rows.push([i + 1, isoDate(r.finish[i]), ...eids.map(id => Math.round(r.estImp[id][i])), ...cids.map(id => Math.round(r.costImp[id][i])),
+    ...sids.map(id => Math.round(r.schedImp[id][i] * 10) / 10), ...(r.timeCost ? [Math.round(r.timeCost[i])] : []), Math.round(r.cost[i])]);
   sheet(rows, "Iterations (first 1000)");
   const safe = m.project.replace(/[\\/:*?"<>|]/g, "_");
   XLSX.writeFile(wb, `MC_${safe}_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -825,7 +936,8 @@ $("btnSample").addEventListener("click", () => loadResult(fromSample(), "Sample 
 $("fileInput").addEventListener("change", async ev => {
   const f = ev.target.files[0]; if (!f) return;
   try {
-    const wb = XLSX.read(await f.arrayBuffer(), { cellDates: true });
+    // Read dates as Excel serial numbers so the date never shifts with the user's time zone.
+    const wb = XLSX.read(await f.arrayBuffer(), { cellDates: false });
     loadResult(fromWorkbook(wb), `File: ${f.name}`);
   } catch (e) { loadResult({ errors: [`Could not read "${f.name}" as an Excel file.`] }, ""); }
   ev.target.value = "";
@@ -834,10 +946,15 @@ $("btnTemplate").addEventListener("click", () => XLSX.writeFile(templateWorkbook
 $("btnRun").addEventListener("click", () => {
   if (!model) return;
   const n = Number($("iterations").value), seed = Number($("seed").value);
-  if (!(Number.isInteger(n) && n >= 100 && n <= 100000)) { showErrors(["Iterations must be a whole number between 100 and 100,000."]); return; }
-  if (!Number.isFinite(seed)) { showErrors(["Random seed must be a number."]); return; }
+  const corr = $("corr").value === "" ? 0 : Number($("corr").value), delayCost = $("delayCost").value === "" ? 0 : Number($("delayCost").value);
+  const bad = [];
+  if (!(Number.isInteger(n) && n >= 100 && n <= 100000)) bad.push("Iterations must be a whole number between 100 and 100,000.");
+  if (!Number.isFinite(seed)) bad.push("Random seed must be a number.");
+  if (!(Number.isFinite(corr) && corr >= 0 && corr <= 0.9)) bad.push("Estimate correlation must be a number from 0 to 0.9.");
+  if (!(Number.isFinite(delayCost) && delayCost >= 0)) bad.push("Delay cost per working day must be 0 or more.");
+  if (bad.length) { showErrors(bad); return; }
   showErrors([]);
-  model.n = n; model.seed = Math.trunc(seed);
+  model.n = n; model.seed = Math.trunc(seed); model.corr = corr; model.delayCost = delayCost;
   const btn = $("btnRun"); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>Running…';
   setTimeout(() => {
     const t0 = performance.now();
