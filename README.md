@@ -32,6 +32,7 @@ Triangular distributions for estimate lines and risk impacts, one occurrence dra
 - Clearer contingency light ("Size of contingency needed for P80"), with an explanation of where the traffic-light thresholds come from
 - Range warning only shows when it is useful; the sensitivity chart shows a short note when nothing varies
 - New Clear / start over button
+- Excel template: input cells highlighted (yellow = your data, light blue = optional settings) and a note on every field explaining what to enter
 - Every result was checked against an independent calculation and a set of known-answer tests
 
 **v2.0 – Nov 2026**
