@@ -23,6 +23,20 @@ Triangular distributions for estimate lines and risk impacts, one occurrence dra
 
 🔒 Runs entirely in your browser – your file is not uploaded anywhere. The sample project is fictional.
 
+## What's new
+
+**v2.1 – 20 Nov 2026**
+- Default estimate correlation is now 0.3 (a more realistic cost range), with guidance on how to choose it
+- Risks are modelled unless their Status is Closed (Active, Ongoing or blank are now included)
+- Opportunities (negative cost or schedule impacts) are now modelled
+- Clearer contingency light ("Size of contingency needed for P80"), with an explanation of where the traffic-light thresholds come from
+- Range warning only shows when it is useful; the sensitivity chart shows a short note when nothing varies
+- New Clear / start over button
+- Every result was checked against an independent calculation and a set of known-answer tests
+
+**v2.0 – Nov 2026**
+- Estimate lines shown as cost drivers, optional estimate correlation and delay cost, sample Excel file
+
 ## Use the online version
 Please use the online version for the latest tested release: https://sara-mostafshar.github.io/monte-carlo-risk-analysis/ – downloaded copies do not receive fixes and updates.
 

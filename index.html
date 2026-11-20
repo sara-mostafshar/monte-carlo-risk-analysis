@@ -243,8 +243,11 @@
 
     <h3>Sensitivity: what moves the result most?</h3>
     <p class="chart-sub">Spearman rank correlation of each risk and each estimate line with total cost, and of each schedule risk with finish delay. Longer bar = stronger influence.</p>
+    <p id="tornadoEmpty" class="hidden">Nothing varies in this run (all estimates fixed and no uncertain risks), so there is nothing to rank.</p>
+    <div id="tornadoWrap">
     <div class="legend"><span style="--c:var(--series-cost)">Risk – cost impact</span><span style="--c:var(--series-est)">Estimate line uncertainty</span><span style="--c:var(--series-sched)">Risk – schedule impact</span></div>
     <div class="chart-box" style="height:440px"><canvas id="tornadoChart" aria-label="Sensitivity tornado chart"></canvas></div>
+    </div>
     <details>
       <summary>Show sensitivity as a table</summary>
       <div class="table-scroll"><table id="sensTable"></table></div>
@@ -290,7 +293,7 @@
   </section>
 </main>
 
-<footer>Monte Carlo Risk Analysis · Built by Sara Mostafshar · Sample project data is fictional</footer>
+<footer>Monte Carlo Risk Analysis · Built by Sara Mostafshar · Version 2.1 – last updated 20 Nov 2026 (<a href="https://github.com/sara-mostafshar/monte-carlo-risk-analysis#whats-new" target="_blank" rel="noopener">what's new</a>) · Sample project data is fictional</footer>
 
 <script>
 "use strict";
@@ -819,7 +822,12 @@ function drawSCurve(id, pts, lines, xFmt, xTitle, sorted, tf) {
 }
 
 function drawTornado(drivers) {
-  const sorted = [...drivers].sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity));
+  // If nothing varies there is nothing to rank: show a short note instead of an empty chart.
+  const live = drivers.filter(d => Number.isFinite(d.sensitivity) && d.sensitivity !== 0);
+  $("tornadoEmpty").classList.toggle("hidden", live.length > 0);
+  $("tornadoWrap").classList.toggle("hidden", live.length === 0);
+  if (!live.length) { charts.tornado?.destroy(); charts.tornado = null; return; }
+  const sorted = [...live].sort((a, b) => Math.abs(b.sensitivity) - Math.abs(a.sensitivity));
   const css = getComputedStyle(document.documentElement);
   const col = { cost: css.getPropertyValue("--series-cost").trim(), schedule: css.getPropertyValue("--series-sched").trim(), estimate: css.getPropertyValue("--series-est").trim() };
   charts.tornado?.destroy();
@@ -906,7 +914,7 @@ function templateWorkbook() {
   const est = [["Base estimate with estimating uncertainty (EUR) – three-point estimate per WBS"],
                ["Most likely = baseline budget. Min/Max = estimate accuracy range. Risk events go in Risk_Register."], [], EST_HEADERS, ...SAMPLE.estimate];
   const risk = [["Risk register – threats with probability and three-point impacts"],
-                ["Probability as a fraction (0.35 = 35%). Leave an impact at 0 if the risk has no impact of that type. Only Status = Open is simulated."], [],
+                ["Probability as a fraction (0.35 = 35%). Leave an impact at 0 if the risk has no impact of that type. Risks with Status = Closed are left out; all others are simulated. Negative impacts are opportunities (savings or time gained)."], [],
                 RISK_HEADERS, ...SAMPLE.risks];
   const add = (rows, name, widths) => { const ws = XLSX.utils.aoa_to_sheet(rows); ws["!cols"] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, name); };
   add(proj, "Project", [58, 32, 50]);
