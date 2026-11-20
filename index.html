@@ -183,7 +183,7 @@
       <div class="settings">
         <label>Iterations <input type="number" id="iterations" min="100" max="100000" step="100"></label>
         <label>Random seed <input type="number" id="seed" step="1"></label>
-        <label>Estimate correlation <input type="number" id="corr" min="0" max="0.9" step="0.05"><span class="hint">0 = lines independent. 0.2–0.5 is typical: lines tend to run high or low together.</span></label>
+        <label>Estimate correlation <input type="number" id="corr" min="0" max="0.9" step="0.05"><span class="hint">0 = lines independent (usually understates the range). 0.3 is a sensible starting point if you have no data; 0.5 if the project depends on one market or contractor.</span></label>
         <label>Delay cost per working day (EUR) <input type="number" id="delayCost" min="0" step="1000"><span class="hint">Optional. Time-related cost (site, staff, equipment) for each day late. 0 = off.</span></label>
       </div>
     </div>
@@ -263,7 +263,8 @@
     <h2>How it works — the full method, no black box</h2>
     <ol>
       <li><strong>Estimate uncertainty.</strong> Each WBS line has a Min, Most likely and Max cost. In every iteration the tool draws one value from a <em>triangular distribution</em> between these three points.<br>
-          <strong>Estimate correlation</strong> (optional, 0 to 0.9) lets the lines move together, as they usually do when market prices or productivity shift for the whole project. It uses one shared factor for all lines (a Gaussian copula); each line keeps its own Min / Most likely / Max. At 0 the lines are independent.</li>
+          <strong>Estimate correlation</strong> (optional, 0 to 0.9) lets the lines move together, as they usually do when market prices or productivity shift for the whole project. It uses one shared factor for all lines (a Gaussian copula); each line keeps its own Min / Most likely / Max. At 0 the lines are independent.<br>
+          <strong>How to choose the correlation.</strong> There is no single correct value; it is a judgement. Ask: <em>if one line overruns, do the others usually overrun too?</em> Rarely: 0.2. Sometimes (most projects): 0.3. Often – the project depends on one market, one main contractor or one estimator: 0.5. 0 assumes the lines never move together, which usually makes the range too narrow; values near 0.9 treat the whole estimate as one line and are very pessimistic. The tool uses one value for all pairs of lines, although in reality some lines (e.g. steel and piping) move together more than others (e.g. permits and engineering). If unsure, run 0.2, 0.3 and 0.5 and show management the range.</li>
       <li><strong>Risk events.</strong> Risks with Status = <code>Closed</code> are left out; all others are used. Negative impacts are opportunities and reduce cost or time. In every iteration each risk either happens (with its probability) or not. If it happens, its cost impact and schedule delay are drawn from their own triangular distributions. The same occurrence hits cost <em>and</em> schedule.</li>
       <li><strong>Total cost</strong> = sum of the WBS draws + cost of the risks that happened + (optional) time-related cost: delay cost per working day × working days later than the planned finish.<br>
           <strong>Budget (BAC)</strong> = sum of the Most likely values + contingency in budget. Contingency itself is not simulated — the question is whether it is enough.</li>
@@ -306,7 +307,7 @@ const SAMPLE = {
     "Remaining duration uncertainty – pessimistic (working days)": 15,
     "Contingency in budget (EUR)": 3000000,
     "Schedule contingency (working days)": 30,
-    "Estimate correlation (0 to 0.9)": 0,
+    "Estimate correlation (0 to 0.9)": 0.3,
     "Time-related cost per working day of delay (EUR)": 0,
     "Iterations": 10000,
     "Random seed": 2026
@@ -701,9 +702,9 @@ function interpret(m, r) {
   });
   const warnings = [];
   if (floatP80 > 20 * 7) warnings.push("The planned finish gives a very large buffer – check that it is correct.");
-  if (r.p50 && (r.p90 - r.p10) / r.p50 < 0.10) warnings.push(m.corr > 0
-    ? "The cost range (P10 to P90) is still below 10% of P50. Check that the Min / Max estimate ranges are realistic for this project stage."
-    : "The cost range (P10 to P90) is below 10% of P50. Estimate lines are treated as independent; on most projects they move together. Try an estimate correlation of 0.3 (in the settings above) to see a more realistic range.");
+  // With correlation 0, suggest 0.3. With a correlation set, warn only if the range is still very narrow.
+  if (!(m.corr > 0)) warnings.push("Estimate lines are treated as independent (correlation 0), which usually makes the cost range too narrow. Try an estimate correlation of 0.3 (in the settings above) to see a more realistic range.");
+  else if (r.p50 && (r.p90 - r.p10) / r.p50 < 0.03) warnings.push("The cost range (P10 to P90) is below 3% of P50, which is very narrow. Check that the Min / Max estimate ranges are realistic for this project stage.");
 
   const gap = contP80 - contHeld;
   const gapText = gap > 0 ? `${fmtMoney(gap)} more than` : gap < 0 ? `${fmtMoney(-gap)} less than` : "equal to";
@@ -898,7 +899,7 @@ function templateWorkbook() {
                 ["Parameter", "Value", "Note"]];
   const notes = { "Planned finish (baseline)": "Date, YYYY-MM-DD", "Contingency in budget (EUR)": "Included in BAC; not simulated",
                   "Schedule contingency (working days)": "Buffer between deterministic finish and planned finish",
-                  "Estimate correlation (0 to 0.9)": "Optional. How strongly WBS estimate lines move together. 0 = independent; 0.2–0.5 typical",
+                  "Estimate correlation (0 to 0.9)": "Optional. How strongly WBS estimate lines move together. 0 = independent (understates range); 0.3 = sensible start; 0.5 = strongly linked",
                   "Time-related cost per working day of delay (EUR)": "Optional. Extra cost per working day later than planned finish. 0 = off",
                   "Iterations": "Number of Monte Carlo iterations", "Random seed": "Same seed = same result" };
   for (const [k, v] of Object.entries(SAMPLE.project)) proj.push([k, v, notes[k] || ""]);
