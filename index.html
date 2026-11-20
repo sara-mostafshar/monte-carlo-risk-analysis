@@ -146,6 +146,7 @@
       <label class="btn" for="fileInput">Upload Excel file</label>
       <input type="file" id="fileInput" accept=".xlsx,.xls">
       <button id="btnTemplate">Download Excel template (with sample data)</button>
+      <button id="btnClear">Clear / start over</button>
       <span class="filename" id="fileName"></span>
     </div>
     <p class="privacy">🔒 Your file is read by your own browser. Nothing is sent to a server, stored, or shared.</p>
@@ -960,6 +961,13 @@ $("fileInput").addEventListener("change", async ev => {
   ev.target.value = "";
 });
 $("btnTemplate").addEventListener("click", () => XLSX.writeFile(templateWorkbook(), "MC_Input_Template.xlsx"));
+// Clear: forget the loaded file and results (nothing is stored anywhere, so this is all there is to clear).
+$("btnClear").addEventListener("click", () => {
+  model = null; result = null; showErrors([]);
+  $("fileInput").value = ""; $("fileName").textContent = ""; $("runInfo").textContent = "";
+  $("btnRun").disabled = true; $("inputsPanel").classList.add("hidden"); $("results").classList.add("hidden");
+  $("step1").scrollIntoView({ behavior: "smooth" });
+});
 $("btnRun").addEventListener("click", () => {
   if (!model) return;
   const n = Number($("iterations").value), seed = Number($("seed").value);
@@ -995,7 +1003,7 @@ $("btnExport").addEventListener("click", () => result && exportResults(model, re
 /* Anonymous usage counting with GoatCounter: only button names are sent, never file contents or data. */
 (function(){
   function gc(name){ try{ if(window.goatcounter&&window.goatcounter.count) window.goatcounter.count({path:name,title:name,event:true}); }catch(e){} }
-  var CLICKS=[["#btnSample",function(){window.__gcSrc="sample";return "mc-try-sample";}],["#btnTemplate","mc-download-template"],["#btnRun",function(){return window.__gcSrc==="own"?"mc-run-own-data":"mc-run-sample";}],["#btnExport","mc-download-results"],["#btnCopy","mc-copy-summary"],["a.yt-watch","mc-youtube-video"],["a.yt-sub","mc-youtube-subscribe"]];
+  var CLICKS=[["#btnSample",function(){window.__gcSrc="sample";return "mc-try-sample";}],["#btnTemplate","mc-download-template"],["#btnRun",function(){return window.__gcSrc==="own"?"mc-run-own-data":"mc-run-sample";}],["#btnExport","mc-download-results"],["#btnCopy","mc-copy-summary"],["#btnClear","mc-clear"],["a.yt-watch","mc-youtube-video"],["a.yt-sub","mc-youtube-subscribe"]];
   var CHANGES=[["#fileInput","mc-upload-own-file"]];
   document.addEventListener("click",function(e){
     for(var i=0;i<CLICKS.length;i++){ var el=e.target.closest&&e.target.closest(CLICKS[i][0]); if(el){ var n=CLICKS[i][1]; gc(typeof n==="function"?n(el):n); return; } }
