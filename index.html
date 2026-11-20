@@ -160,7 +160,7 @@
       </table></div>
       <ul style="font-size:14px;margin:8px 0 0;padding-left:20px">
         <li>Probability as a fraction: <code>0.35</code> means 35%.</li>
-        <li>Only risks with Status = <code>Open</code> are simulated.</li>
+        <li>Risks with Status = <code>Closed</code> are left out; all other risks are simulated. Negative impacts are treated as opportunities (savings or time gained).</li>
         <li>Min ≤ Most likely ≤ Max on every row. Use 0 for an impact type a risk does not have.</li>
         <li>Amounts in EUR, schedule values in working days, dates as real Excel dates or <code>YYYY-MM-DD</code>.</li>
         <li>Column order does not matter; the tool finds columns by their header names. If something is missing or wrong, the tool lists every problem so you can fix it.</li>
@@ -263,7 +263,7 @@
     <ol>
       <li><strong>Estimate uncertainty.</strong> Each WBS line has a Min, Most likely and Max cost. In every iteration the tool draws one value from a <em>triangular distribution</em> between these three points.<br>
           <strong>Estimate correlation</strong> (optional, 0 to 0.9) lets the lines move together, as they usually do when market prices or productivity shift for the whole project. It uses one shared factor for all lines (a Gaussian copula); each line keeps its own Min / Most likely / Max. At 0 the lines are independent.</li>
-      <li><strong>Risk events.</strong> Only risks with Status = <code>Open</code> are used. In every iteration each risk either happens (with its probability) or not. If it happens, its cost impact and schedule delay are drawn from their own triangular distributions. The same occurrence hits cost <em>and</em> schedule.</li>
+      <li><strong>Risk events.</strong> Risks with Status = <code>Closed</code> are left out; all others are used. Negative impacts are opportunities and reduce cost or time. In every iteration each risk either happens (with its probability) or not. If it happens, its cost impact and schedule delay are drawn from their own triangular distributions. The same occurrence hits cost <em>and</em> schedule.</li>
       <li><strong>Total cost</strong> = sum of the WBS draws + cost of the risks that happened + (optional) time-related cost: delay cost per working day × working days later than the planned finish.<br>
           <strong>Budget (BAC)</strong> = sum of the Most likely values + contingency in budget. Contingency itself is not simulated — the question is whether it is enough.</li>
       <li><strong>Finish date</strong> = planned finish + remaining-duration uncertainty (triangular, working days) + delays of risks that happened − schedule contingency, counted in working days (Mon–Fri). All risk delays are assumed to hit the critical path and add up, which is conservative.</li>
@@ -497,7 +497,8 @@ function buildModel(projectMap, estRows, riskRows) {
 
   for (const r of riskRows) {
     if (r.id === null || String(r.id).trim() === "") continue;
-    if (String(r.status ?? "").trim().toLowerCase() !== "open") { m.closedCount++; continue; }
+    // Only risks marked "Closed" are left out; Open, Active, blank or any other status is modelled.
+    if (String(r.status ?? "").trim().toLowerCase().startsWith("closed")) { m.closedCount++; continue; }
     const p = toNum(r.prob);
     if (p === null || isNaN(p) || p < 0 || p > 1) errors.push(`Risk ${r.id}: probability must be a number between 0 and 1 (e.g. 0.35 for 35%); found "${r.prob ?? ""}".`);
     const c = threePoint(`Risk ${r.id} cost impact`, r.cmin, r.cml, r.cmax, true);
@@ -583,12 +584,13 @@ function simulate(m) {
   for (const r of m.risks) {
     const occurs = new Uint8Array(n);
     for (let i = 0; i < n; i++) occurs[i] = rng() < r.prob ? 1 : 0;
-    if (r.cost[2] > 0) {
+    // Negative values are opportunities (savings or time gained) and are modelled too.
+    if (r.cost[0] !== 0 || r.cost[2] !== 0) {
       const a = new Float64Array(n);
       for (let i = 0; i < n; i++) { const v = triangular(rng, ...r.cost); a[i] = occurs[i] ? v : 0; cost[i] += a[i]; }
       costImp[r.id] = a;
     }
-    if (r.sched[2] > 0) {
+    if (r.sched[0] !== 0 || r.sched[2] !== 0) {
       const a = new Float64Array(n);
       for (let i = 0; i < n; i++) { const v = triangular(rng, ...r.sched); a[i] = occurs[i] ? v : 0; }
       schedImp[r.id] = a;
@@ -688,8 +690,8 @@ function interpret(m, r) {
   });
   top.forEach(d => {
     d.why = d.dimension === "cost"
-      ? `When this risk occurs the total cost is higher (correlation ${sign(d.sensitivity)}); it explains ${fmtPct(d.share)} of the total cost uncertainty. Mean impact is ${fmtMoney(d.mean_impact)}.`
-      : `When this risk occurs the finish is later (correlation ${sign(d.sensitivity)}). Mean impact is ${d.mean_impact.toFixed(1)} working days.`;
+      ? `When this risk occurs the total cost is ${d.sensitivity < 0 ? "lower" : "higher"} (correlation ${sign(d.sensitivity)}); it explains ${fmtPct(d.share)} of the total cost uncertainty. Mean impact is ${fmtMoney(d.mean_impact)}.`
+      : `When this risk occurs the finish is ${d.sensitivity < 0 ? "earlier" : "later"} (correlation ${sign(d.sensitivity)}). Mean impact is ${d.mean_impact.toFixed(1)} working days.`;
     d.action = mit[d.risk_id]
       ? `${d.owner || "Risk owner"} to confirm the planned mitigation is funded and on track: ${mit[d.risk_id]}.`
       : `Agree an owner, an early warning trigger, and a funded response plan for ${d.risk_id}.`;
