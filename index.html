@@ -276,7 +276,7 @@
       <tr><td>Headroom to BAC at P80</td><td>≥ 5% of BAC</td><td>0% to 5%</td><td>below 0% (overrun)</td></tr>
       <tr><td>Probability of exceeding BAC</td><td>below 10%</td><td>10% to 25%</td><td>above 25%</td></tr>
       <tr><td>On-time probability</td><td>≥ 80%</td><td>50% to 80%</td><td>below 50%</td></tr>
-      <tr><td>Contingency needed for P80, as % of base</td><td>≤ 10%</td><td>10% to 15%</td><td>above 15%</td></tr>
+      <tr><td>Size of contingency needed for P80, as % of base (how big the risk exposure is, not whether contingency is enough – that is Headroom)</td><td>≤ 10% (normal size)</td><td>10% to 15% (large)</td><td>above 15% (very large)</td></tr>
     </table></div>
     <h3>Good to know</h3>
     <ul>
@@ -672,7 +672,8 @@ function interpret(m, r) {
     { label: "Headroom to BAC at P80", value: headroomShare, status: light(headroomShare, .05, 0, true), note: fmtMoney(headroomP80) },
     { label: "Probability of exceeding BAC", value: probOver, status: probOver < .10 ? "green" : probOver <= .25 ? "amber" : "red", note: "Chance the final cost is above budget" },
     { label: "On-time probability", value: r.probOnTime, status: light(r.probOnTime, .80, .50, true), note: "Finish on or before " + isoDate(m.plannedFinish) },
-    { label: "Contingency needed for P80 (% of base)", value: contShare, status: light(contShare, .10, .15, false), note: `${fmtMoney(contP80)} needed vs ${fmtMoney(contHeld)} held` }
+    { label: "Size of contingency needed for P80 (% of base)", value: contShare, status: light(contShare, .10, .15, false), statusText: { green: "Normal size", amber: "Large", red: "Very large" },
+      note: `${fmtMoney(contP80)} needed vs ${fmtMoney(contHeld)} held – see Headroom for whether it is enough` }
   ];
   // Top 3 distinct risks, keeping each risk's stronger dimension
   const best = {};
@@ -727,7 +728,7 @@ const STATUS_TEXT = { green: "On track", amber: "Watch", red: "Action needed" };
 const DIM_TEXT = { cost: "Cost risk", schedule: "Schedule risk", estimate: "Estimate uncertainty" };
 const impactText = d => d.dimension === "schedule" ? d.mean_impact.toFixed(1) + " wd" : fmtMoney(d.mean_impact);
 const shareText = d => d.dimension === "schedule" ? "–" : fmtPct(d.share);
-const statusPill = s => `<span class="status ${s}"><span class="dot"></span>${STATUS_TEXT[s]}</span>`;
+const statusPill = (s, text) => `<span class="status ${s}"><span class="dot"></span>${(text && text[s]) || STATUS_TEXT[s]}</span>`;
 
 function showErrors(list) {
   const box = $("errors");
@@ -842,7 +843,7 @@ function renderResults(m, r, it) {
   $("headline").textContent = it.headline;
   $("tiles").innerHTML = it.lights.map(l => `
     <div class="tile"><div class="label">${esc(l.label)}</div><div class="value">${fmtPct(l.value)}</div>
-      ${statusPill(l.status)}<div class="note" style="margin-top:6px">${esc(l.note)}</div></div>`).join("");
+      ${statusPill(l.status, l.statusText)}<div class="note" style="margin-top:6px">${esc(l.note)}</div></div>`).join("");
   $("warnings").innerHTML = it.warnings.map(w => `<div class="warn-box">⚠ ${esc(w)}</div>`).join("");
 
   drawSCurve("costChart", sCurveData(r.sc, v => v / 1e6), [
@@ -915,7 +916,7 @@ function exportResults(m, r, it) {
   const wb = XLSX.utils.book_new();
   const sheet = (rows, name, widths) => { const ws = XLSX.utils.aoa_to_sheet(rows); if (widths) ws["!cols"] = widths.map(w => ({ wch: w })); XLSX.utils.book_append_sheet(wb, ws, name); };
   sheet([["Interpretation"], [it.headline], [], ["Cost"], [it.costText], [], ["Schedule"], [it.schedText], [],
-         ["Traffic lights"], ["Measure", "Value", "Status"], ...it.lights.map(l => [l.label, l.value === null ? "n/a" : Math.round(l.value * 1000) / 10 + "%", STATUS_TEXT[l.status]]), [],
+         ["Traffic lights"], ["Measure", "Value", "Status"], ...it.lights.map(l => [l.label, l.value === null ? "n/a" : Math.round(l.value * 1000) / 10 + "%", (l.statusText && l.statusText[l.status]) || STATUS_TEXT[l.status]]), [],
          ["Top 3 risk drivers"], ...it.top.flatMap((d, i) => [[`${i + 1}. ${d.risk_id} ${d.description} (${DIM_TEXT[d.dimension]})`], [d.why], ["Suggested action: " + d.action]]), [],
          ...(it.estTop.length ? [["Estimate lines to firm up"], ...it.estTop.flatMap(d => [[`${d.risk_id} ${d.description}`], [d.why], ["Suggested action: " + d.action]]), []] : []),
          ...(it.warnings.length ? [["Warnings"], ...it.warnings.map(w => [w]), []] : []),
